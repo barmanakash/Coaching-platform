@@ -27,7 +27,7 @@ class UserOut(BaseModel):
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
-    status: Optional[Literal["active", "inactive"]] = None
+    status: Optional[Literal["pending", "active", "inactive"]] = None
 
 
 def _oid(user_id: str) -> ObjectId:
@@ -59,6 +59,13 @@ async def _serialize_user(user: dict) -> UserOut:
     )
 
 
+@router.get("/pending", response_model=list[UserOut])
+async def list_pending_users(current_user: dict = Depends(require_role("admin"))):
+    """Teachers/Students who have signed up but not yet been approved by an admin."""
+    pending = await users_collection.find({"status": "pending"}).sort("created_at", 1).to_list(length=1000)
+    return [await _serialize_user(p) for p in pending]
+
+
 @router.get("/students", response_model=list[UserOut])
 async def list_students(current_user: dict = Depends(require_role("admin"))):
     students = await users_collection.find({"role": "student"}).sort("created_at", -1).to_list(length=1000)
@@ -69,6 +76,26 @@ async def list_students(current_user: dict = Depends(require_role("admin"))):
 async def list_teachers(current_user: dict = Depends(require_role("admin"))):
     teachers = await users_collection.find({"role": "teacher"}).sort("created_at", -1).to_list(length=1000)
     return [await _serialize_user(t) for t in teachers]
+
+
+@router.post("/{user_id}/approve", response_model=UserOut)
+async def approve_user(user_id: str, current_user: dict = Depends(require_role("admin"))):
+    result = await users_collection.find_one_and_update(
+        {"_id": _oid(user_id), "status": "pending"},
+        {"$set": {"status": "active"}},
+        return_document=True,
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending user not found")
+    return await _serialize_user(result)
+
+
+@router.post("/{user_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+async def reject_user(user_id: str, current_user: dict = Depends(require_role("admin"))):
+    """Rejects a pending signup by deleting it outright — they were never an active account."""
+    result = await users_collection.delete_one({"_id": _oid(user_id), "status": "pending"})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending user not found")
 
 
 @router.patch("/{user_id}", response_model=UserOut)

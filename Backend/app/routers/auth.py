@@ -34,13 +34,25 @@ class TokenResponse(BaseModel):
     name: str
 
 
+class SignupResponse(BaseModel):
+    message: str
+    email: EmailStr
+    status: str = "pending"
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest):
     user = await users_collection.find_one({"email": payload.email})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
-    if user.get("status") == "inactive":
+    account_status = user.get("status", "active")
+    if account_status == "pending":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending admin approval. You'll be able to log in once an admin verifies you.",
+        )
+    if account_status == "inactive":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
     token = create_access_token({"sub": str(user["_id"]), "role": user["role"]})
@@ -52,7 +64,7 @@ async def login(payload: LoginRequest):
     )
 
 
-@router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 async def signup(payload: SignupRequest):
     existing = await users_collection.find_one({"email": payload.email})
     if existing:
@@ -64,21 +76,21 @@ async def signup(payload: SignupRequest):
         "password_hash": hash_password(payload.password),
         "role": payload.role,
         "phone": payload.phone,
-        "status": "active",
+        # New self-signups start as "pending" and cannot log in until an
+        # admin approves them (see PATCH /api/users/{id}/approve).
+        "status": "pending",
         "created_at": datetime.now(timezone.utc),
     }
     result = await users_collection.insert_one(new_user)
 
-    token = create_access_token({"sub": str(result.inserted_id), "role": payload.role})
-    return TokenResponse(
-        access_token=token,
-        role=payload.role,
-        user_id=str(result.inserted_id),
-        name=payload.name,
+    return SignupResponse(
+        message="Your account has been created and is pending admin approval. You'll be able to log in once approved.",
+        email=payload.email,
+        status="pending",
     )
 
 
-# NOTE: Admin-driven creation of Teacher/Student accounts (with admin approval,
-# course assignment, etc.) will be added under /api/users once Student &
-# Teacher Management (PRD sections 5 & 6) are built. This /signup endpoint
-# is the self-service path only.
+# NOTE: This /signup endpoint is the self-service path for Teacher/Student.
+# Accounts start as "pending" and require admin approval (app/routers/users.py)
+# before they can log in. Admin accounts are seeded separately and never
+# self-registered (see app/scripts/seed_admin.py).

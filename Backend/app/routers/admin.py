@@ -14,6 +14,7 @@ class AdminDashboardStats(BaseModel):
     active_classes: int
     upcoming_classes: int
     pending_doubts: int
+    pending_approvals: int
 
 
 @router.get("/dashboard", response_model=AdminDashboardStats)
@@ -25,6 +26,7 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin")
     active_classes = await classes_collection.count_documents({"status": "live"})
     upcoming_classes = await classes_collection.count_documents({"status": "scheduled"})
     pending_doubts = await doubts_collection.count_documents({"status": {"$in": ["OPEN", "IN_PROGRESS"]}})
+    pending_approvals = await users_collection.count_documents({"status": "pending"})
 
     return AdminDashboardStats(
         total_students=total_students,
@@ -33,4 +35,5 @@ async def get_dashboard_stats(current_user: dict = Depends(require_role("admin")
         active_classes=active_classes,
         upcoming_classes=upcoming_classes,
         pending_doubts=pending_doubts,
+        pending_approvals=pending_approvals,
     )
