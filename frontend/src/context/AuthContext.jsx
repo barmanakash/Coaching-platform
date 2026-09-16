@@ -23,16 +23,9 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signup = useCallback(async ({ name, email, password, role, phone }) => {
-    const data = await signupApi({ name, email, password, role, phone });
-    const userInfo = {
-      userId: data.user_id,
-      name: data.name,
-      role: data.role,
-    };
-    localStorage.setItem('access_token', data.access_token);
-    localStorage.setItem('user', JSON.stringify(userInfo));
-    setUser(userInfo);
-    return userInfo;
+    // Accounts start "pending" and require admin approval, so signup does
+    // NOT log the user in — it just returns the confirmation message.
+    return signupApi({ name, email, password, role, phone });
   }, []);
 
   const logout = useCallback(() => {

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Typography, Grid, Chip, CircularProgress, Alert, Box } from '@mui/material';
+import { Typography, Grid, Chip, CircularProgress, Alert } from '@mui/material';
 import { motion } from 'framer-motion';
 import { listCourses } from '../../services/api/courseApi';
 import TiltCard from '../../components/TiltCard';
 
-export default function TeacherMyCourses() {
+export default function StudentMyCourses() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -12,7 +12,7 @@ export default function TeacherMyCourses() {
   useEffect(() => {
     listCourses()
       .then(setCourses)
-      .catch(() => setError('Could not load your courses.'))
+      .catch(() => setError('Could not load courses.'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -26,7 +26,7 @@ export default function TeacherMyCourses() {
         <CircularProgress />
       ) : courses.length === 0 ? (
         <Alert severity="info">
-          You haven't been assigned to any course yet. Ask an admin to assign you as a teacher on a course.
+          No published courses are available yet. Check back once your institute publishes one.
         </Alert>
       ) : (
         <Grid container spacing={2.5}>
@@ -42,10 +42,12 @@ export default function TeacherMyCourses() {
                   <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1 }}>
                     {c.description || 'No description yet.'}
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                    <Chip label={c.status} size="small" color={c.status === 'published' ? 'success' : 'default'} />
-                    <Chip label={`${c.student_count} students`} size="small" variant="outlined" />
-                  </Box>
+                  <Chip
+                    label={c.teacher_names?.length ? `Taught by ${c.teacher_names.join(', ')}` : 'Teacher unassigned'}
+                    size="small"
+                    variant="outlined"
+                    sx={{ alignSelf: 'flex-start', mt: 1 }}
+                  />
                 </TiltCard>
               </motion.div>
             </Grid>

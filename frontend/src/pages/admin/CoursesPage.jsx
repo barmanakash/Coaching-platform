@@ -3,46 +3,81 @@ import {
   Typography, Paper, Table, TableHead, TableBody, TableRow, TableCell,
   Chip, IconButton, CircularProgress, Alert, Tooltip, Snackbar, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Box,
+  Select, MenuItem, InputLabel, FormControl, OutlinedInput,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
-import { listCourses, createCourse, updateCourse, deleteCourse } from '../../services/api/adminApi';
+import { listCourses, createCourse, updateCourse, deleteCourse, listTeachers } from '../../services/api/adminApi';
+
+const emptyForm = { title: '', description: '', teacherIds: [] };
 
 export default function CoursesPage() {
   const [courses, setCourses] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
 
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [editingCourseId, setEditingCourseId] = useState(null);
+  const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
-    listCourses()
-      .then(setCourses)
+    Promise.all([listCourses(), listTeachers()])
+      .then(([courseData, teacherData]) => {
+        setCourses(courseData);
+        setTeachers(teacherData);
+      })
       .catch(() => setError('Could not load courses.'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const handleCreate = async () => {
-    if (!title.trim()) return;
+  const openCreateDialog = () => {
+    setEditingCourseId(null);
+    setForm(emptyForm);
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (course) => {
+    setEditingCourseId(course.id);
+    setForm({
+      title: course.title,
+      description: course.description || '',
+      teacherIds: course.teacher_ids || [],
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.title.trim()) return;
     setSaving(true);
     try {
-      await createCourse({ title, description, teacher_ids: [] });
-      setToast('Course created');
+      if (editingCourseId) {
+        await updateCourse(editingCourseId, {
+          title: form.title,
+          description: form.description,
+          teacher_ids: form.teacherIds,
+        });
+        setToast('Course updated');
+      } else {
+        await createCourse({
+          title: form.title,
+          description: form.description,
+          teacher_ids: form.teacherIds,
+        });
+        setToast('Course created');
+      }
       setDialogOpen(false);
-      setTitle('');
-      setDescription('');
       load();
     } catch {
-      setToast('Failed to create course');
+      setToast(editingCourseId ? 'Failed to update course' : 'Failed to create course');
     } finally {
       setSaving(false);
     }
@@ -70,11 +105,13 @@ export default function CoursesPage() {
     }
   };
 
+  const teacherNameById = (id) => teachers.find((t) => t.id === id)?.name || id;
+
   return (
     <>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" fontWeight={700}>Courses</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={openCreateDialog}>
           New Course
         </Button>
       </Box>
@@ -122,6 +159,11 @@ export default function CoursesPage() {
                     />
                   </TableCell>
                   <TableCell align="right">
+                    <Tooltip title="Edit / Assign Teacher">
+                      <IconButton onClick={() => openEditDialog(c)} size="small">
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title={c.status === 'published' ? 'Unpublish' : 'Publish'}>
                       <IconButton onClick={() => togglePublish(c)} size="small">
                         {c.status === 'published' ? <UnpublishedIcon fontSize="small" /> : <PublishIcon fontSize="small" />}
@@ -141,15 +183,15 @@ export default function CoursesPage() {
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Create Course</DialogTitle>
+        <DialogTitle>{editingCourseId ? 'Edit Course' : 'Create Course'}</DialogTitle>
         <DialogContent>
           <TextField
             label="Course Title"
             fullWidth
             required
             margin="normal"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            value={form.title}
+            onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
           />
           <TextField
             label="Description"
@@ -157,14 +199,36 @@ export default function CoursesPage() {
             multiline
             rows={3}
             margin="normal"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
           />
+
+          <FormControl fullWidth margin="normal">
+            <InputLabel id="teacher-select-label">Assign Teacher(s)</InputLabel>
+            <Select
+              labelId="teacher-select-label"
+              multiple
+              value={form.teacherIds}
+              onChange={(e) => {
+                const value = e.target.value;
+                setForm((f) => ({ ...f, teacherIds: typeof value === 'string' ? value.split(',') : value }));
+              }}
+              input={<OutlinedInput label="Assign Teacher(s)" />}
+              renderValue={(selected) => selected.map(teacherNameById).join(', ') || 'Unassigned'}
+            >
+              {teachers.length === 0 && (
+                <MenuItem disabled>No teachers have signed up yet</MenuItem>
+              )}
+              {teachers.map((t) => (
+                <MenuItem key={t.id} value={t.id}>{t.name} ({t.email})</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreate} disabled={saving || !title.trim()}>
-            {saving ? 'Creating...' : 'Create'}
+          <Button variant="contained" onClick={handleSave} disabled={saving || !form.title.trim()}>
+            {saving ? 'Saving...' : editingCourseId ? 'Save Changes' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>

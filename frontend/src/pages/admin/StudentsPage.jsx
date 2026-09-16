@@ -6,7 +6,7 @@ import {
 import BlockIcon from '@mui/icons-material/Block';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { listStudents, updateUser, deleteUser } from '../../services/api/adminApi';
+import { listStudents, updateUser, deleteUser, approveUser } from '../../services/api/adminApi';
 
 export default function StudentsPage() {
   const [students, setStudents] = useState([]);
@@ -32,6 +32,16 @@ export default function StudentsPage() {
       load();
     } catch {
       setToast('Failed to update status');
+    }
+  };
+
+  const handleApprove = async (student) => {
+    try {
+      await approveUser(student.id);
+      setToast(`${student.name} approved — they can now log in`);
+      load();
+    } catch {
+      setToast('Failed to approve student');
     }
   };
 
@@ -83,17 +93,25 @@ export default function StudentsPage() {
                   <TableCell>
                     <Chip
                       label={s.status}
-                      color={s.status === 'active' ? 'success' : 'default'}
+                      color={s.status === 'active' ? 'success' : s.status === 'pending' ? 'warning' : 'default'}
                       size="small"
                     />
                   </TableCell>
                   <TableCell>{s.enrolled_courses_count ?? 0}</TableCell>
                   <TableCell align="right">
-                    <Tooltip title={s.status === 'active' ? 'Deactivate' : 'Activate'}>
-                      <IconButton onClick={() => toggleStatus(s)} size="small">
-                        {s.status === 'active' ? <BlockIcon fontSize="small" /> : <CheckCircleIcon fontSize="small" />}
-                      </IconButton>
-                    </Tooltip>
+                    {s.status === 'pending' ? (
+                      <Tooltip title="Approve this signup">
+                        <IconButton onClick={() => handleApprove(s)} size="small" color="success">
+                          <CheckCircleIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip title={s.status === 'active' ? 'Deactivate' : 'Activate'}>
+                        <IconButton onClick={() => toggleStatus(s)} size="small">
+                          {s.status === 'active' ? <BlockIcon fontSize="small" /> : <CheckCircleIcon fontSize="small" />}
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title="Delete">
                       <IconButton onClick={() => handleDelete(s)} size="small" color="error">
                         <DeleteIcon fontSize="small" />
