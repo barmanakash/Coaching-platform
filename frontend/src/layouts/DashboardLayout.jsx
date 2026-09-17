@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import {
   AppBar, Toolbar, Typography, Drawer, List, Box, Button, Avatar,
+  IconButton, Badge, Menu, MenuItem, Divider,
 } from '@mui/material';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import LogoutIcon from '@mui/icons-material/Logout';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
 import PageFade from '../components/PageFade';
 
 const DRAWER_WIDTH = 260;
@@ -20,10 +24,18 @@ export default function DashboardLayout({ title, navItems }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { notifications, unreadCount, markRead, markAllRead } = usePresence();
+  const [bellAnchor, setBellAnchor] = useState(null);
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleNotificationClick = (n) => {
+    setBellAnchor(null);
+    if (!n.read) markRead(n.id);
+    if (n.link) navigate(n.link);
   };
 
   return (
@@ -41,6 +53,45 @@ export default function DashboardLayout({ title, navItems }) {
         <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
           <Typography variant="h6" noWrap sx={{ color: '#FFFFFF' }}>{title}</Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <IconButton onClick={(e) => setBellAnchor(e.currentTarget)} sx={{ color: '#FFFFFF' }}>
+              <Badge badgeContent={unreadCount} color="secondary">
+                <NotificationsIcon />
+              </Badge>
+            </IconButton>
+            <Menu
+              anchorEl={bellAnchor}
+              open={!!bellAnchor}
+              onClose={() => setBellAnchor(null)}
+              PaperProps={{ sx: { width: 340, maxHeight: 420 } }}
+            >
+              <Box sx={{ px: 2, py: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="subtitle2">Notifications</Typography>
+                {unreadCount > 0 && (
+                  <Typography variant="caption" sx={{ cursor: 'pointer', color: 'primary.main' }} onClick={markAllRead}>
+                    Mark all read
+                  </Typography>
+                )}
+              </Box>
+              <Divider />
+              {notifications.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+                  You're all caught up.
+                </Typography>
+              )}
+              {notifications.slice(0, 15).map((n) => (
+                <MenuItem
+                  key={n.id}
+                  onClick={() => handleNotificationClick(n)}
+                  sx={{ whiteSpace: 'normal', alignItems: 'flex-start', bgcolor: n.read ? 'transparent' : 'action.hover' }}
+                >
+                  <Box>
+                    <Typography variant="body2" fontWeight={n.read ? 500 : 700}>{n.title}</Typography>
+                    <Typography variant="caption" color="text.secondary">{n.message}</Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Menu>
+
             <Avatar
               sx={{
                 width: 34, height: 34, fontSize: 14, fontWeight: 700,

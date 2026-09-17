@@ -15,6 +15,20 @@ export const listTeachers = async () => {
   return response.data;
 };
 
+export const listPendingUsers = async () => {
+  const response = await axiosClient.get('/api/users/pending');
+  return response.data;
+};
+
+export const approveUser = async (userId) => {
+  const response = await axiosClient.post(`/api/users/${userId}/approve`);
+  return response.data;
+};
+
+export const rejectUser = async (userId) => {
+  await axiosClient.post(`/api/users/${userId}/reject`);
+};
+
 export const updateUser = async (userId, fields) => {
   const response = await axiosClient.patch(`/api/users/${userId}`, fields);
   return response.data;

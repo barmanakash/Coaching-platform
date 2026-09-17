@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from app.core.database import users_collection
 from app.core.security import hash_password, verify_password, create_access_token
+from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -82,6 +83,16 @@ async def signup(payload: SignupRequest):
         "created_at": datetime.now(timezone.utc),
     }
     result = await users_collection.insert_one(new_user)
+
+    admins = await users_collection.find({"role": "admin"}).to_list(length=100)
+    for admin in admins:
+        await create_notification(
+            user_id=str(admin["_id"]),
+            type="signup_pending",
+            title="New signup pending approval",
+            message=f"{payload.name} signed up as a {payload.role}",
+            link="/admin/approvals",
+        )
 
     return SignupResponse(
         message="Your account has been created and is pending admin approval. You'll be able to log in once approved.",

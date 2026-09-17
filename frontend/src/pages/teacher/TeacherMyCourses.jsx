@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Typography, Grid, Chip, CircularProgress, Alert, Box } from '@mui/material';
 import { motion } from 'framer-motion';
 import { listCourses } from '../../services/api/courseApi';
 import TiltCard from '../../components/TiltCard';
 
 export default function TeacherMyCourses() {
+  const navigate = useNavigate();
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,7 +39,7 @@ export default function TeacherMyCourses() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05, duration: 0.4 }}
               >
-                <TiltCard sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <TiltCard onClick={() => navigate(`/teacher/courses/${c.id}`)} sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Typography variant="h6">{c.title}</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ flexGrow: 1 }}>
                     {c.description || 'No description yet.'}

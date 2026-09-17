@@ -85,6 +85,21 @@ async def list_courses(current_user: dict = Depends(get_current_user)):
     return [await _serialize_course(c) for c in courses]
 
 
+@router.get("/{course_id}", response_model=CourseOut)
+async def get_course(course_id: str, current_user: dict = Depends(get_current_user)):
+    course = await courses_collection.find_one({"_id": _oid(course_id)})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+
+    role = current_user["role"]
+    if role == "teacher" and current_user["user_id"] not in course.get("teacher_ids", []):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
+    if role == "student" and course.get("status") != "published":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
+
+    return await _serialize_course(course)
+
+
 @router.post("", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 async def create_course(
     payload: CourseCreateRequest,

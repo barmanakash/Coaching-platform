@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr
 
 from app.core.database import users_collection, enrollments_collection, courses_collection
 from app.core.security import require_role
+from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -87,6 +88,15 @@ async def approve_user(user_id: str, current_user: dict = Depends(require_role("
     )
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending user not found")
+
+    await create_notification(
+        user_id=user_id,
+        type="account_approved",
+        title="Your account has been approved",
+        message="You can now log in and start using the platform.",
+        link="/login",
+    )
+
     return await _serialize_user(result)
 
 

@@ -6,3 +6,8 @@ export const listCourses = async () => {
   const response = await axiosClient.get('/api/courses');
   return response.data;
 };
+
+export const getCourse = async (courseId) => {
+  const response = await axiosClient.get(`/api/courses/${courseId}`);
+  return response.data;
+};

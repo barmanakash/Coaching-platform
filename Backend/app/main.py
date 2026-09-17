@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import ping_database
-from app.routers import auth, users, courses, admin
+from app.routers import auth, users, courses, admin, modules, doubts, conversations, notifications
+from app.websocket import chat as ws_chat, presence as ws_presence
 
 app = FastAPI(title="Coaching & School Learning Platform API", version="0.1.0")
 
@@ -39,12 +40,17 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(courses.router)
 app.include_router(admin.router)
-# Future: students, teachers (dedicated endpoints beyond /api/users), modules,
-# resources, enrollments, classes, doubts, conversations, notifications.
+app.include_router(modules.router)
+app.include_router(doubts.router)
+app.include_router(conversations.router)
+app.include_router(notifications.router)
+# Future: students, teachers (dedicated endpoints beyond /api/users),
+# enrollments, classes.
 
 # ---------- WebSocket routes ----------
-# Future: /ws/chat/{conversation_id}, /ws/presence,
-# /ws/notifications, /ws/meeting/{meeting_id}
+app.include_router(ws_chat.router)
+app.include_router(ws_presence.router)
+# Future: /ws/notifications, /ws/meeting/{meeting_id}
 
 
 @app.get("/")
