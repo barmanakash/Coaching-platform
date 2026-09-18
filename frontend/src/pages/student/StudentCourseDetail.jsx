@@ -15,6 +15,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import { getCourse } from '../../services/api/courseApi';
 import { listModules, listResources } from '../../services/api/moduleApi';
+import { resolveResourceUrl } from '../../services/api/axiosClient';
 
 const TYPE_ICONS = {
   link: LinkIcon,
@@ -96,7 +97,7 @@ export default function StudentCourseDetail() {
                     const Icon = TYPE_ICONS[r.type] || LinkIcon;
                     return (
                       <ListItem key={r.id} disablePadding>
-                        <ListItemButton component="a" href={r.url} target="_blank" rel="noopener noreferrer">
+                        <ListItemButton component="a" href={resolveResourceUrl(r.url)} target="_blank" rel="noopener noreferrer">
                           <ListItemIcon sx={{ minWidth: 36 }}><Icon fontSize="small" color="primary" /></ListItemIcon>
                           <ListItemText primary={r.title} secondary={r.description || 'Open resource'} />
                         </ListItemButton>

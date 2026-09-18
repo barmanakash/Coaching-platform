@@ -1,6 +1,13 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+
+// Uploaded files are stored as relative paths (e.g. "/media/pdf/xyz.pdf")
+// since they're served by the backend, not the frontend dev server.
+export const resolveResourceUrl = (url) => {
+  if (!url) return url;
+  return url.startsWith('/') ? `${API_BASE_URL}${url}` : url;
+};
 
 const axiosClient = axios.create({
   baseURL: API_BASE_URL,

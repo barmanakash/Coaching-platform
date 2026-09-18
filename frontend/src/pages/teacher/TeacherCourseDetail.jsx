@@ -4,12 +4,11 @@ import {
   Typography, Box, Button, Accordion, AccordionSummary, AccordionDetails,
   IconButton, Chip, CircularProgress, Alert, Snackbar, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, Tooltip, List, ListItem,
-  ListItemText, ListItemIcon, Stack,
+  ListItemText, ListItemIcon, Stack, ToggleButtonGroup, ToggleButton, LinearProgress,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
@@ -17,11 +16,13 @@ import ImageIcon from '@mui/icons-material/Image';
 import DescriptionIcon from '@mui/icons-material/Description';
 import LinkIcon from '@mui/icons-material/Link';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { getCourse } from '../../services/api/courseApi';
 import {
   listModules, createModule, deleteModule,
   listResources, createResource, deleteResource,
 } from '../../services/api/moduleApi';
+import { uploadFile as uploadFileApi } from '../../services/api/uploadApi';
 
 const RESOURCE_TYPES = [
   { value: 'link', label: 'Link', icon: LinkIcon },
@@ -32,7 +33,12 @@ const RESOURCE_TYPES = [
   { value: 'assignment', label: 'Assignment', icon: AssignmentIcon },
 ];
 
+// Backend upload validation only knows pdf/image/video/document buckets.
+const UPLOAD_TYPE_FOR = { pdf: 'pdf', image: 'image', video: 'video', document: 'document', assignment: 'document' };
+
 const typeIcon = (type) => RESOURCE_TYPES.find((t) => t.value === type)?.icon || LinkIcon;
+
+const emptyResourceForm = { title: '', description: '', type: 'link', url: '' };
 
 export default function TeacherCourseDetail() {
   const { courseId } = useParams();
@@ -51,7 +57,10 @@ export default function TeacherCourseDetail() {
 
   const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
   const [activeModuleId, setActiveModuleId] = useState(null);
-  const [resourceForm, setResourceForm] = useState({ title: '', description: '', type: 'link', url: '' });
+  const [resourceForm, setResourceForm] = useState(emptyResourceForm);
+  const [resourceMode, setResourceMode] = useState('link'); // 'link' | 'upload'
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [savingResource, setSavingResource] = useState(false);
 
   const loadResourcesForModule = useCallback(async (moduleId) => {
@@ -104,23 +113,42 @@ export default function TeacherCourseDetail() {
 
   const openResourceDialog = (moduleId) => {
     setActiveModuleId(moduleId);
-    setResourceForm({ title: '', description: '', type: 'link', url: '' });
+    setResourceForm(emptyResourceForm);
+    setResourceMode('link');
+    setSelectedFile(null);
+    setUploadProgress(0);
     setResourceDialogOpen(true);
   };
 
+  const handleTypeChange = (type) => {
+    setResourceForm((f) => ({ ...f, type }));
+    if (type === 'link') setResourceMode('link');
+  };
+
   const handleAddResource = async () => {
-    if (!resourceForm.title.trim() || !resourceForm.url.trim()) return;
+    if (!resourceForm.title.trim()) return;
+    if (resourceMode === 'link' && !resourceForm.url.trim()) return;
+    if (resourceMode === 'upload' && !selectedFile) return;
+
     setSavingResource(true);
     try {
-      await createResource(activeModuleId, resourceForm);
+      let url = resourceForm.url;
+      if (resourceMode === 'upload') {
+        setUploadProgress(0);
+        const uploaded = await uploadFileApi(selectedFile, UPLOAD_TYPE_FOR[resourceForm.type], setUploadProgress);
+        url = uploaded.url;
+      }
+
+      await createResource(activeModuleId, { ...resourceForm, url });
       setToast('Resource added');
       setResourceDialogOpen(false);
       loadResourcesForModule(activeModuleId);
       setModules((prev) => prev.map((m) => (m.id === activeModuleId ? { ...m, resource_count: m.resource_count + 1 } : m)));
-    } catch {
-      setToast('Failed to add resource');
+    } catch (err) {
+      setToast(err.response?.data?.detail || 'Failed to add resource');
     } finally {
       setSavingResource(false);
+      setUploadProgress(0);
     }
   };
 
@@ -138,6 +166,8 @@ export default function TeacherCourseDetail() {
 
   if (loading) return <CircularProgress />;
   if (error) return <Alert severity="error">{error}</Alert>;
+
+  const canUpload = resourceForm.type !== 'link';
 
   return (
     <>
@@ -244,17 +274,49 @@ export default function TeacherCourseDetail() {
           />
           <TextField
             select label="Type" fullWidth margin="normal"
-            value={resourceForm.type} onChange={(e) => setResourceForm((f) => ({ ...f, type: e.target.value }))}
+            value={resourceForm.type} onChange={(e) => handleTypeChange(e.target.value)}
           >
             {RESOURCE_TYPES.map((t) => (
               <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            label="URL (link, or hosted file URL)" fullWidth required margin="normal"
-            placeholder="https://..."
-            value={resourceForm.url} onChange={(e) => setResourceForm((f) => ({ ...f, url: e.target.value }))}
-          />
+
+          {canUpload && (
+            <ToggleButtonGroup
+              value={resourceMode}
+              exclusive
+              size="small"
+              fullWidth
+              sx={{ mt: 1, mb: 1 }}
+              onChange={(_e, v) => v && setResourceMode(v)}
+            >
+              <ToggleButton value="link">Paste Link</ToggleButton>
+              <ToggleButton value="upload">Upload File</ToggleButton>
+            </ToggleButtonGroup>
+          )}
+
+          {resourceMode === 'link' ? (
+            <TextField
+              label="URL" fullWidth required margin="normal"
+              placeholder="https://..."
+              value={resourceForm.url} onChange={(e) => setResourceForm((f) => ({ ...f, url: e.target.value }))}
+            />
+          ) : (
+            <Box sx={{ mt: 2, mb: 1 }}>
+              <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} fullWidth>
+                {selectedFile ? selectedFile.name : 'Choose a file'}
+                <input
+                  type="file"
+                  hidden
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                />
+              </Button>
+              {savingResource && uploadProgress > 0 && (
+                <LinearProgress variant="determinate" value={uploadProgress} sx={{ mt: 1 }} />
+              )}
+            </Box>
+          )}
+
           <TextField
             label="Description (optional)" fullWidth multiline rows={2} margin="normal"
             value={resourceForm.description} onChange={(e) => setResourceForm((f) => ({ ...f, description: e.target.value }))}
@@ -265,7 +327,11 @@ export default function TeacherCourseDetail() {
           <Button
             variant="contained"
             onClick={handleAddResource}
-            disabled={savingResource || !resourceForm.title.trim() || !resourceForm.url.trim()}
+            disabled={
+              savingResource ||
+              !resourceForm.title.trim() ||
+              (resourceMode === 'link' ? !resourceForm.url.trim() : !selectedFile)
+            }
           >
             {savingResource ? 'Adding...' : 'Add'}
           </Button>
