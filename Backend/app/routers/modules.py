@@ -6,7 +6,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.core.database import courses_collection, modules_collection, resources_collection
+from app.core.database import courses_collection, modules_collection, resources_collection, enrollments_collection
 from app.core.security import get_current_user
 
 router = APIRouter(tags=["modules & resources"])
@@ -38,15 +38,19 @@ async def _assert_can_edit_course(course: dict, current_user: dict):
 
 
 async def _assert_can_view_course(course: dict, current_user: dict):
-    """Admin: always. Teacher: if assigned. Student: only if the course is published
-    (mirrors the same visibility rule as the course catalog itself)."""
+    """Admin: always. Teacher: if assigned. Student: only if actually enrolled
+    and the course is published (mirrors the course catalog's visibility rule)."""
     role = current_user["role"]
     if role == "admin":
         return
     if role == "teacher" and current_user["user_id"] in course.get("teacher_ids", []):
         return
     if role == "student" and course.get("status") == "published":
-        return
+        enrollment = await enrollments_collection.find_one(
+            {"course_id": str(course["_id"]), "student_id": current_user["user_id"]}
+        )
+        if enrollment:
+            return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
 
 

@@ -6,7 +6,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.core.database import doubts_collection, courses_collection, users_collection
+from app.core.database import doubts_collection, courses_collection, users_collection, enrollments_collection
 from app.core.security import get_current_user
 from app.services.notifications import create_notification
 
@@ -116,6 +116,11 @@ async def create_doubt(payload: DoubtCreateRequest, current_user: dict = Depends
         course = await courses_collection.find_one({"_id": _oid(payload.course_id, "course id")})
         if not course:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+        enrollment = await enrollments_collection.find_one(
+            {"course_id": payload.course_id, "student_id": current_user["user_id"]}
+        )
+        if not enrollment:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not enrolled in this course")
 
     now = datetime.now(timezone.utc)
     doc = {

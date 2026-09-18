@@ -1,12 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.core.config import settings
 from app.core.database import ping_database
-from app.routers import auth, users, courses, admin, modules, doubts, conversations, notifications
-from app.websocket import chat as ws_chat, presence as ws_presence
+from app.core.storage import MEDIA_ROOT
+from app.routers import auth, users, courses, admin, modules, doubts, conversations, notifications, enrollments, classes, uploads
+from app.websocket import chat as ws_chat, presence as ws_presence, meeting as ws_meeting
 
 app = FastAPI(title="Coaching & School Learning Platform API", version="0.1.0")
+
+os.makedirs(MEDIA_ROOT, exist_ok=True)
+app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
 
 def _normalize_origin(origin: str) -> str:
     return origin.strip().rstrip("/")
@@ -44,13 +50,16 @@ app.include_router(modules.router)
 app.include_router(doubts.router)
 app.include_router(conversations.router)
 app.include_router(notifications.router)
-# Future: students, teachers (dedicated endpoints beyond /api/users),
-# enrollments, classes.
+app.include_router(enrollments.router)
+app.include_router(classes.router)
+app.include_router(uploads.router)
+# Future: students, teachers (dedicated endpoints beyond /api/users).
 
 # ---------- WebSocket routes ----------
 app.include_router(ws_chat.router)
 app.include_router(ws_presence.router)
-# Future: /ws/notifications, /ws/meeting/{meeting_id}
+app.include_router(ws_meeting.router)
+# Future: /ws/notifications
 
 
 @app.get("/")

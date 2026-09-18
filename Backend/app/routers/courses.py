@@ -6,7 +6,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.core.database import courses_collection, users_collection
+from app.core.database import courses_collection, users_collection, enrollments_collection
 from app.core.security import require_role, get_current_user
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -50,7 +50,6 @@ async def _serialize_course(course: dict) -> CourseOut:
         cursor = users_collection.find({"_id": {"$in": [ObjectId(t) for t in teacher_ids]}})
         teacher_names = [t["name"] async for t in cursor]
 
-    from app.core.database import enrollments_collection
     student_count = await enrollments_collection.count_documents({"course_id": str(course["_id"])})
 
     return CourseOut(
@@ -70,8 +69,8 @@ async def list_courses(current_user: dict = Depends(get_current_user)):
     """
     - Admin: sees every course (draft + published).
     - Teacher: sees only courses they are assigned to teach.
-    - Student: sees published courses (self-enrollment/assignment UI is a
-      future phase, so for now every student can browse the live catalog).
+    - Student: sees only courses they've been enrolled in by an admin
+      (see /api/courses/{id}/enrollments), and only while published.
     """
     role = current_user["role"]
     if role == "admin":
@@ -79,7 +78,11 @@ async def list_courses(current_user: dict = Depends(get_current_user)):
     elif role == "teacher":
         query = {"teacher_ids": current_user["user_id"]}
     else:  # student
-        query = {"status": "published"}
+        enrollments = await enrollments_collection.find(
+            {"student_id": current_user["user_id"]}
+        ).to_list(length=1000)
+        course_ids = [ObjectId(e["course_id"]) for e in enrollments]
+        query = {"_id": {"$in": course_ids}, "status": "published"}
 
     courses = await courses_collection.find(query).sort("created_at", -1).to_list(length=1000)
     return [await _serialize_course(c) for c in courses]
@@ -94,8 +97,12 @@ async def get_course(course_id: str, current_user: dict = Depends(get_current_us
     role = current_user["role"]
     if role == "teacher" and current_user["user_id"] not in course.get("teacher_ids", []):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
-    if role == "student" and course.get("status") != "published":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
+    if role == "student":
+        enrollment = await enrollments_collection.find_one(
+            {"course_id": course_id, "student_id": current_user["user_id"]}
+        )
+        if not enrollment or course.get("status") != "published":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this course")
 
     return await _serialize_course(course)
 

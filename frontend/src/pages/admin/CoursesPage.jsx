@@ -3,14 +3,17 @@ import {
   Typography, Paper, Table, TableHead, TableBody, TableRow, TableCell,
   Chip, IconButton, CircularProgress, Alert, Tooltip, Snackbar, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Box,
-  Select, MenuItem, InputLabel, FormControl, OutlinedInput,
+  Select, MenuItem, InputLabel, FormControl, OutlinedInput, List,
+  ListItem, ListItemText, Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PublishIcon from '@mui/icons-material/Publish';
 import UnpublishedIcon from '@mui/icons-material/Unpublished';
-import { listCourses, createCourse, updateCourse, deleteCourse, listTeachers } from '../../services/api/adminApi';
+import GroupIcon from '@mui/icons-material/Group';
+import { listCourses, createCourse, updateCourse, deleteCourse, listTeachers, listStudents } from '../../services/api/adminApi';
+import { listCourseEnrollments, enrollStudent, unenrollStudent } from '../../services/api/enrollmentApi';
 
 const emptyForm = { title: '', description: '', teacherIds: [] };
 
@@ -25,6 +28,13 @@ export default function CoursesPage() {
   const [editingCourseId, setEditingCourseId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+
+  const [studentsDialogOpen, setStudentsDialogOpen] = useState(false);
+  const [activeCourse, setActiveCourse] = useState(null);
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
+  const [studentToAdd, setStudentToAdd] = useState('');
+  const [enrolling, setEnrolling] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -107,6 +117,45 @@ export default function CoursesPage() {
 
   const teacherNameById = (id) => teachers.find((t) => t.id === id)?.name || id;
 
+  const openStudentsDialog = async (course) => {
+    setActiveCourse(course);
+    setStudentsDialogOpen(true);
+    setStudentToAdd('');
+    const [enrolled, students] = await Promise.all([listCourseEnrollments(course.id), listStudents()]);
+    setEnrolledStudents(enrolled);
+    setAllStudents(students);
+  };
+
+  const availableStudents = allStudents.filter(
+    (s) => !enrolledStudents.some((e) => e.id === s.id)
+  );
+
+  const handleEnroll = async () => {
+    if (!studentToAdd) return;
+    setEnrolling(true);
+    try {
+      await enrollStudent(activeCourse.id, studentToAdd);
+      const enrolled = await listCourseEnrollments(activeCourse.id);
+      setEnrolledStudents(enrolled);
+      setStudentToAdd('');
+      load();
+    } catch {
+      setToast('Failed to enroll student');
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const handleUnenroll = async (student) => {
+    try {
+      await unenrollStudent(activeCourse.id, student.id);
+      setEnrolledStudents((prev) => prev.filter((s) => s.id !== student.id));
+      load();
+    } catch {
+      setToast('Failed to remove student');
+    }
+  };
+
   return (
     <>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -150,7 +199,15 @@ export default function CoursesPage() {
                     </Typography>
                   </TableCell>
                   <TableCell>{c.teacher_names?.length ? c.teacher_names.join(', ') : 'Unassigned'}</TableCell>
-                  <TableCell>{c.student_count}</TableCell>
+                  <TableCell>
+                    <Chip
+                      label={`${c.student_count} enrolled`}
+                      size="small"
+                      variant="outlined"
+                      onClick={() => openStudentsDialog(c)}
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={c.status}
@@ -159,6 +216,11 @@ export default function CoursesPage() {
                     />
                   </TableCell>
                   <TableCell align="right">
+                    <Tooltip title="Manage Students">
+                      <IconButton onClick={() => openStudentsDialog(c)} size="small">
+                        <GroupIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title="Edit / Assign Teacher">
                       <IconButton onClick={() => openEditDialog(c)} size="small">
                         <EditIcon fontSize="small" />
@@ -182,6 +244,7 @@ export default function CoursesPage() {
         </Paper>
       )}
 
+      {/* Create/Edit Course Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{editingCourseId ? 'Edit Course' : 'Create Course'}</DialogTitle>
         <DialogContent>
@@ -230,6 +293,59 @@ export default function CoursesPage() {
           <Button variant="contained" onClick={handleSave} disabled={saving || !form.title.trim()}>
             {saving ? 'Saving...' : editingCourseId ? 'Save Changes' : 'Create'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Manage Students Dialog */}
+      <Dialog open={studentsDialogOpen} onClose={() => setStudentsDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Manage Students {activeCourse ? `— ${activeCourse.title}` : ''}</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', gap: 1, mb: 2, mt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="add-student-label">Enroll a student</InputLabel>
+              <Select
+                labelId="add-student-label"
+                label="Enroll a student"
+                value={studentToAdd}
+                onChange={(e) => setStudentToAdd(e.target.value)}
+              >
+                {availableStudents.length === 0 && (
+                  <MenuItem disabled>No more students to add</MenuItem>
+                )}
+                {availableStudents.map((s) => (
+                  <MenuItem key={s.id} value={s.id}>{s.name} ({s.email})</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button variant="contained" onClick={handleEnroll} disabled={!studentToAdd || enrolling}>
+              Add
+            </Button>
+          </Box>
+
+          <Divider sx={{ mb: 1 }} />
+
+          <List dense>
+            {enrolledStudents.length === 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+                No students enrolled yet.
+              </Typography>
+            )}
+            {enrolledStudents.map((s) => (
+              <ListItem
+                key={s.id}
+                secondaryAction={
+                  <IconButton edge="end" size="small" color="error" onClick={() => handleUnenroll(s)}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                }
+              >
+                <ListItemText primary={s.name} secondary={s.email} />
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStudentsDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 
