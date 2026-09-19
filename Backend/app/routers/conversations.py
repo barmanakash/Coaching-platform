@@ -3,7 +3,7 @@ from typing import Optional
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from app.core.database import conversations_collection, messages_collection, users_collection
@@ -139,12 +139,31 @@ async def list_conversations(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/{conversation_id}/messages", response_model=list[MessageOut])
-async def get_messages(conversation_id: str, current_user: dict = Depends(get_current_user)):
+async def get_messages(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user),
+    limit: int = Query(default=50, ge=1, le=200),
+    before: Optional[datetime] = Query(default=None, description="Fetch messages older than this timestamp, for 'load more'"),
+):
+    """
+    Returns the most recent `limit` messages (oldest-first, ready to render
+    top-to-bottom) by default. Pass `before` (a message's created_at) to
+    page further back in history — keeps a long-running conversation from
+    ever loading its entire history in one request.
+    """
     conv = await conversations_collection.find_one({"_id": _oid(conversation_id, "conversation id")})
     if not conv or current_user["user_id"] not in conv.get("participant_ids", []):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this conversation")
 
-    messages = await messages_collection.find({"conversation_id": conversation_id}).sort("created_at", 1).to_list(length=500)
+    query = {"conversation_id": conversation_id}
+    if before:
+        query["created_at"] = {"$lt": before}
+
+    # Fetch newest-first (so `limit` gets the most recent page), then
+    # reverse to the oldest-first order the chat UI expects.
+    messages = await messages_collection.find(query).sort("created_at", -1).to_list(length=limit)
+    messages.reverse()
+
     return [
         MessageOut(
             id=str(m["_id"]), conversation_id=conversation_id, sender_id=m["sender_id"],

@@ -46,8 +46,8 @@ export default function Signup() {
       setError('Passwords do not match');
       return;
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
@@ -152,7 +152,7 @@ export default function Signup() {
             <TextField
               label="Password" type="password" fullWidth required margin="normal"
               value={password} onChange={(e) => setPassword(e.target.value)}
-              helperText="At least 6 characters"
+              helperText="At least 8 characters"
             />
             <TextField
               label="Confirm Password" type="password" fullWidth required margin="normal"

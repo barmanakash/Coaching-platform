@@ -15,7 +15,9 @@ export const listConversations = async () => {
   return response.data;
 };
 
-export const getMessages = async (conversationId) => {
-  const response = await axiosClient.get(`/api/conversations/${conversationId}/messages`);
+export const getMessages = async (conversationId, { before, limit = 50 } = {}) => {
+  const params = { limit };
+  if (before) params.before = before;
+  const response = await axiosClient.get(`/api/conversations/${conversationId}/messages`, { params });
   return response.data;
 };

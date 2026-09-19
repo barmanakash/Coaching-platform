@@ -30,10 +30,18 @@ MAX_FILE_SIZE_BYTES = {
 }
 
 
+class FileTooLargeError(Exception):
+    def __init__(self, max_size_bytes: int):
+        self.max_size_bytes = max_size_bytes
+        super().__init__(f"File exceeds the {max_size_bytes // (1024 * 1024)}MB limit")
+
+
 class StorageBackend(ABC):
     @abstractmethod
-    async def save(self, file: UploadFile, subfolder: str) -> tuple[str, int]:
-        """Persists the file and returns (public_url, size_in_bytes)."""
+    async def save(self, file: UploadFile, subfolder: str, max_size_bytes: int) -> tuple[str, int]:
+        """Persists the file and returns (public_url, size_in_bytes).
+        Raises FileTooLargeError if the stream exceeds max_size_bytes,
+        without ever buffering more than that much data on disk."""
 
     @abstractmethod
     def delete(self, url: str) -> None:
@@ -45,7 +53,7 @@ class LocalDiskStorage(StorageBackend):
         self.media_root = media_root
         os.makedirs(self.media_root, exist_ok=True)
 
-    async def save(self, file: UploadFile, subfolder: str) -> tuple[str, int]:
+    async def save(self, file: UploadFile, subfolder: str, max_size_bytes: int) -> tuple[str, int]:
         folder = os.path.join(self.media_root, subfolder)
         os.makedirs(folder, exist_ok=True)
 
@@ -54,10 +62,17 @@ class LocalDiskStorage(StorageBackend):
         path = os.path.join(folder, stored_name)
 
         size = 0
-        with open(path, "wb") as out_file:
-            while chunk := await file.read(1024 * 1024):  # 1MB chunks
-                size += len(chunk)
-                out_file.write(chunk)
+        try:
+            with open(path, "wb") as out_file:
+                while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                    size += len(chunk)
+                    if size > max_size_bytes:
+                        raise FileTooLargeError(max_size_bytes)
+                    out_file.write(chunk)
+        except FileTooLargeError:
+            if os.path.isfile(path):
+                os.remove(path)
+            raise
 
         return f"/media/{subfolder}/{stored_name}", size
 

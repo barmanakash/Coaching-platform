@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from pydantic import BaseModel
 
 from app.core.security import get_current_user
-from app.core.storage import get_storage, ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES
+from app.core.storage import get_storage, ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES, FileTooLargeError
+from app.core.logging_config import logger
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -34,15 +35,19 @@ async def upload_file(
             detail=f"'{ext}' is not allowed for {resource_type}. Allowed: {allowed}",
         )
 
-    storage = get_storage()
-    url, size = await storage.save(file, subfolder=resource_type)
-
     max_size = MAX_FILE_SIZE_BYTES[resource_type]
-    if size > max_size:
-        storage.delete(url)
+    storage = get_storage()
+
+    try:
+        # max_size is enforced WHILE streaming to disk, not after the full
+        # upload completes, so an oversized/malicious upload can't fill
+        # disk space before being rejected.
+        url, size = await storage.save(file, subfolder=resource_type, max_size_bytes=max_size)
+    except FileTooLargeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large: {size // (1024*1024)}MB exceeds the {max_size // (1024*1024)}MB limit for {resource_type}",
+            detail=f"File too large: exceeds the {max_size // (1024 * 1024)}MB limit for {resource_type}",
         )
 
+    logger.info(f"File uploaded by user {current_user['user_id']}: {resource_type}, {size} bytes")
     return UploadResponse(url=url, filename=file.filename, size=size, resource_type=resource_type)

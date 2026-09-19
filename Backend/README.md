@@ -22,6 +22,21 @@ uvicorn app.main:app --reload
 - Docs: http://localhost:8000/docs
 - Health check: http://localhost:8000/health
 
+## Testing
+
+Tests run against a separate `coaching_platform_test` database on the same
+MongoDB server (auto-selected via env vars in `tests/conftest.py`) and wipe
+it clean before every test, so they never touch your dev data.
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+Covers: signup/login/approval flow, role-based access control on courses,
+enrollment-gated visibility, the doubt lifecycle, and module/resource
+permissions (including the resource-URL XSS guard).
+
 ## Structure
 
 ```

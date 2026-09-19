@@ -22,6 +22,8 @@ export default function ChatPage() {
   const [draft, setDraft] = useState('');
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [contacts, setContacts] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -35,7 +37,10 @@ export default function ChatPage() {
 
   const openConversation = useCallback((conv) => {
     setActiveConversation(conv);
-    getMessages(conv.id).then(setMessages);
+    getMessages(conv.id).then((msgs) => {
+      setMessages(msgs);
+      setHasMore(msgs.length === 50);
+    });
 
     if (socketRef.current) socketRef.current.close();
     const socket = createSocket(`/ws/chat/${conv.id}`);
@@ -47,6 +52,18 @@ export default function ChatPage() {
     };
     socketRef.current = socket;
   }, []);
+
+  const loadEarlier = async () => {
+    if (!activeConversation || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const older = await getMessages(activeConversation.id, { before: messages[0].created_at });
+      setMessages((prev) => [...older, ...prev]);
+      setHasMore(older.length === 50);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => () => { socketRef.current?.close(); }, []);
 
@@ -135,6 +152,11 @@ export default function ChatPage() {
               </Typography>
             </Box>
             <Box sx={{ flexGrow: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+              {hasMore && (
+                <Button size="small" onClick={loadEarlier} disabled={loadingMore} sx={{ alignSelf: 'center', mb: 1 }}>
+                  {loadingMore ? 'Loading...' : 'Load earlier messages'}
+                </Button>
+              )}
               {messages.map((m, i) => {
                 const isMine = m.sender_id === user.userId;
                 return (

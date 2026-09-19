@@ -4,12 +4,20 @@ from typing import Optional, Literal
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.database import courses_collection, modules_collection, resources_collection, enrollments_collection
 from app.core.security import get_current_user
 
 router = APIRouter(tags=["modules & resources"])
+
+
+def _validate_resource_url(value: str) -> str:
+    """Only allow http(s) links or our own /media/ upload paths — blocks
+    javascript:, data:, and other schemes that could be used for XSS."""
+    if not (value.startswith("http://") or value.startswith("https://") or value.startswith("/media/")):
+        raise ValueError("URL must start with http://, https://, or be an uploaded /media/ file")
+    return value
 
 
 # ---------- Helpers ----------
@@ -82,7 +90,9 @@ class ResourceCreateRequest(BaseModel):
     title: str = Field(min_length=2, max_length=150)
     description: str = ""
     type: Literal["pdf", "image", "video", "document", "link", "assignment"]
-    url: str = Field(min_length=1, description="External link, or file URL once file storage is wired up")
+    url: str = Field(min_length=1, description="External http(s) link, or an uploaded /media/ file URL")
+
+    _validate_url = field_validator("url")(_validate_resource_url)
 
 
 class ResourceUpdateRequest(BaseModel):
@@ -90,6 +100,8 @@ class ResourceUpdateRequest(BaseModel):
     description: Optional[str] = None
     type: Optional[Literal["pdf", "image", "video", "document", "link", "assignment"]] = None
     url: Optional[str] = None
+
+    _validate_url = field_validator("url")(lambda cls, v: _validate_resource_url(v) if v is not None else v)
 
 
 class ResourceOut(BaseModel):

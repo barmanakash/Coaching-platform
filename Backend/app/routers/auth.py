@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from bson import ObjectId
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.database import users_collection
 from app.core.security import hash_password, verify_password, create_access_token
+from app.core.rate_limit import limiter
+from app.core.logging_config import logger
 from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -20,7 +22,7 @@ class LoginRequest(BaseModel):
 class SignupRequest(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     email: EmailStr
-    password: str = Field(min_length=6, max_length=72)
+    password: str = Field(min_length=8, max_length=72)
     # Public signup is only for Teacher/Student. Admin accounts are seeded
     # separately (see app/scripts/seed_admin.py) and never self-registered.
     role: Literal["teacher", "student"]
@@ -42,9 +44,11 @@ class SignupResponse(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest):
+@limiter.limit("5/minute")
+async def login(request: Request, payload: LoginRequest):
     user = await users_collection.find_one({"email": payload.email})
     if not user or not verify_password(payload.password, user["password_hash"]):
+        logger.warning(f"Failed login attempt for email={payload.email} from {request.client.host}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     account_status = user.get("status", "active")
@@ -66,7 +70,8 @@ async def login(payload: LoginRequest):
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
-async def signup(payload: SignupRequest):
+@limiter.limit("3/minute")
+async def signup(request: Request, payload: SignupRequest):
     existing = await users_collection.find_one({"email": payload.email})
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
