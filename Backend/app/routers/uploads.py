@@ -42,7 +42,10 @@ async def upload_file(
         # max_size is enforced WHILE streaming to disk, not after the full
         # upload completes, so an oversized/malicious upload can't fill
         # disk space before being rejected.
-        url, size = await storage.save(file, subfolder=resource_type, max_size_bytes=max_size)
+        # Files live under a per-institute folder so tenants' uploads stay separated on disk
+        # (and can later be access-controlled or quota'd per institute).
+        subfolder = f"{current_user['institute_id']}/{resource_type}"
+        url, size = await storage.save(file, subfolder=subfolder, max_size_bytes=max_size)
     except FileTooLargeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

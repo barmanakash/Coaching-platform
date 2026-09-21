@@ -5,11 +5,22 @@ from app.core.database import notifications_collection
 from app.websocket.manager import manager
 
 
-async def create_notification(user_id: str, type: str, title: str, message: str, link: Optional[str] = None) -> dict:
+async def create_notification(
+    user_id: str,
+    type: str,
+    title: str,
+    message: str,
+    link: Optional[str] = None,
+    institute_id: Optional[str] = None,
+) -> dict:
     """Persists a notification and pushes it live if the user has any
     socket open (chat and/or presence both register under the same
-    user_id, so this reaches whichever is connected)."""
+    user_id, so this reaches whichever is connected).
+
+    `institute_id` is stored on the document so notifications stay
+    tenant-scoped for future institute-wide queries and clean-up."""
     doc = {
+        "institute_id": institute_id,
         "user_id": user_id,
         "type": type,
         "title": title,

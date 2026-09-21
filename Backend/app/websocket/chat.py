@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from bson import ObjectId
 
-from app.core.security import decode_access_token
+from app.core.security import authenticate_token
 from app.core.database import messages_collection, conversations_collection, users_collection
 from app.websocket.manager import manager
 from app.services.notifications import create_notification
@@ -14,19 +14,24 @@ router = APIRouter()
 @router.websocket("/ws/chat/{conversation_id}")
 async def chat_websocket(websocket: WebSocket, conversation_id: str, token: str = Query(...)):
     try:
-        payload = decode_access_token(token)
+        user = await authenticate_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
 
-    user_id = payload.get("sub")
-    role = payload.get("role")
-    if not user_id:
-        await websocket.close(code=4401)
+    user_id = user["user_id"]
+    role = user["role"]
+    institute_id = user["institute_id"]
+    if not institute_id:
+        await websocket.close(code=4403)
         return
 
     try:
-        conversation = await conversations_collection.find_one({"_id": ObjectId(conversation_id)})
+        # Scoped to the caller's institute: a conversation id from another
+        # tenant is indistinguishable from one that doesn't exist.
+        conversation = await conversations_collection.find_one(
+            {"_id": ObjectId(conversation_id), "institute_id": institute_id}
+        )
     except Exception:
         await websocket.close(code=4400)
         return
@@ -35,7 +40,7 @@ async def chat_websocket(websocket: WebSocket, conversation_id: str, token: str 
         await websocket.close(code=4403)
         return
 
-    await manager.connect(user_id, websocket)
+    await manager.connect(user_id, websocket, institute_id)
     try:
         while True:
             data = await websocket.receive_json()
@@ -43,12 +48,13 @@ async def chat_websocket(websocket: WebSocket, conversation_id: str, token: str 
             if not content:
                 continue
 
-            user = await users_collection.find_one({"_id": ObjectId(user_id)})
+            sender = await users_collection.find_one({"_id": ObjectId(user_id)})
             now = datetime.now(timezone.utc)
             message = {
+                "institute_id": institute_id,
                 "conversation_id": conversation_id,
                 "sender_id": user_id,
-                "sender_name": user["name"] if user else "Unknown",
+                "sender_name": sender["name"] if sender else "Unknown",
                 "sender_role": role,
                 "content": content,
                 "created_at": now,
@@ -56,7 +62,7 @@ async def chat_websocket(websocket: WebSocket, conversation_id: str, token: str 
             result = await messages_collection.insert_one(message)
 
             await conversations_collection.update_one(
-                {"_id": ObjectId(conversation_id)},
+                {"_id": ObjectId(conversation_id), "institute_id": institute_id},
                 {"$set": {"last_message_at": now, "last_message_preview": content[:120]}},
             )
 
@@ -83,6 +89,7 @@ async def chat_websocket(websocket: WebSocket, conversation_id: str, token: str 
                         title=f"New message from {message['sender_name']}",
                         message=content[:120],
                         link=f"/{recipient['role']}/chat",
+                        institute_id=institute_id,
                     )
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)

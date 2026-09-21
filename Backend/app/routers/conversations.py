@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.core.database import conversations_collection, messages_collection, users_collection
 from app.core.security import get_current_user
+from app.core.tenant import scoped
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
@@ -54,9 +55,9 @@ class MessageOut(BaseModel):
 
 @router.get("/contacts", response_model=list[ContactOut])
 async def list_contacts(current_user: dict = Depends(get_current_user)):
-    """Teacher <-> Student chat only, for now (mirrors the doubt system's scope).
-    Course-based scoping (only chat with your assigned teacher/enrolled students)
-    will tighten this once enrollment is built."""
+    """Teacher <-> Student chat only, for now (mirrors the doubt system's scope),
+    and only within the caller's own institute. Course-based scoping (only chat
+    with your assigned teacher/enrolled students) will tighten this further."""
     role = current_user["role"]
     if role == "student":
         target_role = "teacher"
@@ -65,7 +66,7 @@ async def list_contacts(current_user: dict = Depends(get_current_user)):
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chat is available to teachers and students")
 
-    users = await users_collection.find({"role": target_role, "status": "active"}).to_list(length=1000)
+    users = await users_collection.find(scoped(current_user, {"role": target_role, "status": "active"})).to_list(length=1000)
     return [
         ContactOut(
             id=str(u["_id"]), name=u["name"], email=u["email"], role=u["role"],
@@ -82,16 +83,18 @@ async def start_conversation(payload: StartConversationRequest, current_user: di
     if me == other:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot start a conversation with yourself")
 
-    other_user = await users_collection.find_one({"_id": _oid(other, "user id")})
+    # Scoped lookup: a user from another institute is reported as "not found".
+    other_user = await users_collection.find_one(scoped(current_user, {"_id": _oid(other, "user id")}))
     if not other_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    conv = await conversations_collection.find_one({
+    conv = await conversations_collection.find_one(scoped(current_user, {
         "participant_ids": {"$all": [me, other]},
         "type": "direct",
-    })
+    }))
     if not conv:
         doc = {
+            "institute_id": current_user["institute_id"],
             "participant_ids": [me, other],
             "type": "direct",
             "created_at": datetime.now(timezone.utc),
@@ -116,14 +119,16 @@ async def start_conversation(payload: StartConversationRequest, current_user: di
 @router.get("", response_model=list[ConversationOut])
 async def list_conversations(current_user: dict = Depends(get_current_user)):
     me = current_user["user_id"]
-    convs = await conversations_collection.find({"participant_ids": me}).sort("last_message_at", -1).to_list(length=200)
+    convs = await conversations_collection.find(
+        scoped(current_user, {"participant_ids": me})
+    ).sort("last_message_at", -1).to_list(length=200)
 
     out = []
     for c in convs:
         other_id = next((p for p in c["participant_ids"] if p != me), None)
         if not other_id:
             continue
-        other_user = await users_collection.find_one({"_id": ObjectId(other_id)})
+        other_user = await users_collection.find_one(scoped(current_user, {"_id": ObjectId(other_id)}))
         if not other_user:
             continue
         out.append(ConversationOut(
@@ -151,7 +156,7 @@ async def get_messages(
     page further back in history — keeps a long-running conversation from
     ever loading its entire history in one request.
     """
-    conv = await conversations_collection.find_one({"_id": _oid(conversation_id, "conversation id")})
+    conv = await conversations_collection.find_one(scoped(current_user, {"_id": _oid(conversation_id, "conversation id")}))
     if not conv or current_user["user_id"] not in conv.get("participant_ids", []):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot view this conversation")
 

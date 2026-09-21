@@ -1,5 +1,5 @@
 from typing import Literal, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -8,6 +8,8 @@ from pydantic import BaseModel, EmailStr
 
 from app.core.database import users_collection, enrollments_collection, courses_collection
 from app.core.security import require_role
+from app.core.tenant import scoped
+from app.services.audit import log_action
 from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -62,27 +64,29 @@ async def _serialize_user(user: dict) -> UserOut:
 
 @router.get("/pending", response_model=list[UserOut])
 async def list_pending_users(current_user: dict = Depends(require_role("admin"))):
-    """Teachers/Students who have signed up but not yet been approved by an admin."""
-    pending = await users_collection.find({"status": "pending"}).sort("created_at", 1).to_list(length=1000)
+    """Accounts still awaiting approval. New accounts are created through
+    invitations and are active immediately, so this only lists accounts
+    that pre-date invite-only onboarding."""
+    pending = await users_collection.find(scoped(current_user, {"status": "pending"})).sort("created_at", 1).to_list(length=1000)
     return [await _serialize_user(p) for p in pending]
 
 
 @router.get("/students", response_model=list[UserOut])
 async def list_students(current_user: dict = Depends(require_role("admin"))):
-    students = await users_collection.find({"role": "student"}).sort("created_at", -1).to_list(length=1000)
+    students = await users_collection.find(scoped(current_user, {"role": "student"})).sort("created_at", -1).to_list(length=1000)
     return [await _serialize_user(s) for s in students]
 
 
 @router.get("/teachers", response_model=list[UserOut])
 async def list_teachers(current_user: dict = Depends(require_role("admin"))):
-    teachers = await users_collection.find({"role": "teacher"}).sort("created_at", -1).to_list(length=1000)
+    teachers = await users_collection.find(scoped(current_user, {"role": "teacher"})).sort("created_at", -1).to_list(length=1000)
     return [await _serialize_user(t) for t in teachers]
 
 
 @router.post("/{user_id}/approve", response_model=UserOut)
 async def approve_user(user_id: str, current_user: dict = Depends(require_role("admin"))):
     result = await users_collection.find_one_and_update(
-        {"_id": _oid(user_id), "status": "pending"},
+        scoped(current_user, {"_id": _oid(user_id), "status": "pending"}),
         {"$set": {"status": "active"}},
         return_document=True,
     )
@@ -95,6 +99,11 @@ async def approve_user(user_id: str, current_user: dict = Depends(require_role("
         title="Your account has been approved",
         message="You can now log in and start using the platform.",
         link="/login",
+        institute_id=current_user["institute_id"],
+    )
+    await log_action(
+        institute_id=current_user["institute_id"], actor_id=current_user["user_id"],
+        action="user.approved", entity_type="user", entity_id=user_id,
     )
 
     return await _serialize_user(result)
@@ -102,10 +111,14 @@ async def approve_user(user_id: str, current_user: dict = Depends(require_role("
 
 @router.post("/{user_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
 async def reject_user(user_id: str, current_user: dict = Depends(require_role("admin"))):
-    """Rejects a pending signup by deleting it outright — they were never an active account."""
-    result = await users_collection.delete_one({"_id": _oid(user_id), "status": "pending"})
+    """Rejects a pending account by deleting it outright — they were never an active account."""
+    result = await users_collection.delete_one(scoped(current_user, {"_id": _oid(user_id), "status": "pending"}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pending user not found")
+    await log_action(
+        institute_id=current_user["institute_id"], actor_id=current_user["user_id"],
+        action="user.rejected", entity_type="user", entity_id=user_id,
+    )
 
 
 @router.patch("/{user_id}", response_model=UserOut)
@@ -118,18 +131,34 @@ async def update_user(
     if not update_fields:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update")
 
+    if user_id == current_user["user_id"] and update_fields.get("status", "active") != "active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot deactivate your own account")
+
     result = await users_collection.find_one_and_update(
-        {"_id": _oid(user_id)},
+        scoped(current_user, {"_id": _oid(user_id)}),
         {"$set": update_fields},
         return_document=True,
     )
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    await log_action(
+        institute_id=current_user["institute_id"], actor_id=current_user["user_id"],
+        action="user.updated", entity_type="user", entity_id=user_id,
+        details={"fields": sorted(update_fields.keys())},
+    )
     return await _serialize_user(result)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(user_id: str, current_user: dict = Depends(require_role("admin"))):
-    result = await users_collection.delete_one({"_id": _oid(user_id)})
+    if user_id == current_user["user_id"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+
+    result = await users_collection.delete_one(scoped(current_user, {"_id": _oid(user_id)}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    await log_action(
+        institute_id=current_user["institute_id"], actor_id=current_user["user_id"],
+        action="user.deleted", entity_type="user", entity_id=user_id,
+    )

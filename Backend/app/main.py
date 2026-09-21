@@ -12,10 +12,13 @@ from app.core.database import ping_database, ensure_indexes
 from app.core.storage import MEDIA_ROOT
 from app.core.logging_config import logger
 from app.core.rate_limit import limiter
-from app.routers import auth, users, courses, admin, modules, doubts, conversations, notifications, enrollments, classes, uploads
+from app.routers import (
+    auth, users, courses, admin, modules, doubts, conversations, notifications, enrollments, classes, uploads,
+    institute, invitations, super_admin, audit_logs,
+)
 from app.websocket import chat as ws_chat, presence as ws_presence, meeting as ws_meeting
 
-app = FastAPI(title="Coaching & School Learning Platform API", version="0.1.0")
+app = FastAPI(title="CoachingOS API", version="2.0.0-dev")
 
 os.makedirs(MEDIA_ROOT, exist_ok=True)
 app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
@@ -103,6 +106,10 @@ app.include_router(notifications.router)
 app.include_router(enrollments.router)
 app.include_router(classes.router)
 app.include_router(uploads.router)
+app.include_router(institute.router)
+app.include_router(invitations.router)
+app.include_router(super_admin.router)
+app.include_router(audit_logs.router)
 # Future: students, teachers (dedicated endpoints beyond /api/users).
 
 # ---------- WebSocket routes ----------

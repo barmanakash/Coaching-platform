@@ -8,16 +8,10 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.database import courses_collection, modules_collection, resources_collection, enrollments_collection
 from app.core.security import get_current_user
+from app.core.tenant import scoped
+from app.core.validators import validate_safe_url as _validate_resource_url
 
 router = APIRouter(tags=["modules & resources"])
-
-
-def _validate_resource_url(value: str) -> str:
-    """Only allow http(s) links or our own /media/ upload paths — blocks
-    javascript:, data:, and other schemes that could be used for XSS."""
-    if not (value.startswith("http://") or value.startswith("https://") or value.startswith("/media/")):
-        raise ValueError("URL must start with http://, https://, or be an uploaded /media/ file")
-    return value
 
 
 # ---------- Helpers ----------
@@ -29,11 +23,18 @@ def _oid(id_str: str, label: str = "id") -> ObjectId:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid {label}")
 
 
-async def _get_course_or_404(course_id: str) -> dict:
-    course = await courses_collection.find_one({"_id": _oid(course_id, "course id")})
+async def _get_course_or_404(course_id: str, current_user: dict) -> dict:
+    course = await courses_collection.find_one(scoped(current_user, {"_id": _oid(course_id, "course id")}))
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
+
+
+async def _get_module_or_404(module_id: str, current_user: dict) -> dict:
+    module = await modules_collection.find_one(scoped(current_user, {"_id": _oid(module_id, "module id")}))
+    if not module:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
+    return module
 
 
 async def _assert_can_edit_course(course: dict, current_user: dict):
@@ -55,7 +56,7 @@ async def _assert_can_view_course(course: dict, current_user: dict):
         return
     if role == "student" and course.get("status") == "published":
         enrollment = await enrollments_collection.find_one(
-            {"course_id": str(course["_id"]), "student_id": current_user["user_id"]}
+            scoped(current_user, {"course_id": str(course["_id"]), "student_id": current_user["user_id"]})
         )
         if enrollment:
             return
@@ -148,13 +149,15 @@ def _serialize_resource(r: dict) -> ResourceOut:
 
 @router.get("/api/courses/{course_id}/modules", response_model=list[ModuleOut])
 async def list_modules(course_id: str, current_user: dict = Depends(get_current_user)):
-    course = await _get_course_or_404(course_id)
+    course = await _get_course_or_404(course_id, current_user)
     await _assert_can_view_course(course, current_user)
 
-    modules = await modules_collection.find({"course_id": course_id}).sort("order", 1).to_list(length=500)
+    modules = await modules_collection.find(
+        scoped(current_user, {"course_id": course_id})
+    ).sort("order", 1).to_list(length=500)
     out = []
     for m in modules:
-        count = await resources_collection.count_documents({"module_id": str(m["_id"])})
+        count = await resources_collection.count_documents(scoped(current_user, {"module_id": str(m["_id"])}))
         out.append(_serialize_module(m, count))
     return out
 
@@ -165,10 +168,11 @@ async def create_module(
     payload: ModuleCreateRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    course = await _get_course_or_404(course_id)
+    course = await _get_course_or_404(course_id, current_user)
     await _assert_can_edit_course(course, current_user)
 
     doc = {
+        "institute_id": current_user["institute_id"],
         "course_id": course_id,
         "title": payload.title,
         "description": payload.description,
@@ -187,10 +191,8 @@ async def update_module(
     payload: ModuleUpdateRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    module = await modules_collection.find_one({"_id": _oid(module_id, "module id")})
-    if not module:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
-    course = await _get_course_or_404(module["course_id"])
+    module = await _get_module_or_404(module_id, current_user)
+    course = await _get_course_or_404(module["course_id"], current_user)
     await _assert_can_edit_course(course, current_user)
 
     update_fields = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -200,19 +202,17 @@ async def update_module(
     result = await modules_collection.find_one_and_update(
         {"_id": module["_id"]}, {"$set": update_fields}, return_document=True,
     )
-    count = await resources_collection.count_documents({"module_id": module_id})
+    count = await resources_collection.count_documents(scoped(current_user, {"module_id": module_id}))
     return _serialize_module(result, count)
 
 
 @router.delete("/api/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_module(module_id: str, current_user: dict = Depends(get_current_user)):
-    module = await modules_collection.find_one({"_id": _oid(module_id, "module id")})
-    if not module:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
-    course = await _get_course_or_404(module["course_id"])
+    module = await _get_module_or_404(module_id, current_user)
+    course = await _get_course_or_404(module["course_id"], current_user)
     await _assert_can_edit_course(course, current_user)
 
-    await resources_collection.delete_many({"module_id": module_id})
+    await resources_collection.delete_many(scoped(current_user, {"module_id": module_id}))
     await modules_collection.delete_one({"_id": module["_id"]})
 
 
@@ -220,13 +220,13 @@ async def delete_module(module_id: str, current_user: dict = Depends(get_current
 
 @router.get("/api/modules/{module_id}/resources", response_model=list[ResourceOut])
 async def list_resources(module_id: str, current_user: dict = Depends(get_current_user)):
-    module = await modules_collection.find_one({"_id": _oid(module_id, "module id")})
-    if not module:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
-    course = await _get_course_or_404(module["course_id"])
+    module = await _get_module_or_404(module_id, current_user)
+    course = await _get_course_or_404(module["course_id"], current_user)
     await _assert_can_view_course(course, current_user)
 
-    resources = await resources_collection.find({"module_id": module_id}).sort("created_at", 1).to_list(length=500)
+    resources = await resources_collection.find(
+        scoped(current_user, {"module_id": module_id})
+    ).sort("created_at", 1).to_list(length=500)
     return [_serialize_resource(r) for r in resources]
 
 
@@ -236,13 +236,12 @@ async def create_resource(
     payload: ResourceCreateRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    module = await modules_collection.find_one({"_id": _oid(module_id, "module id")})
-    if not module:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
-    course = await _get_course_or_404(module["course_id"])
+    module = await _get_module_or_404(module_id, current_user)
+    course = await _get_course_or_404(module["course_id"], current_user)
     await _assert_can_edit_course(course, current_user)
 
     doc = {
+        "institute_id": current_user["institute_id"],
         "module_id": module_id,
         "course_id": module["course_id"],
         "title": payload.title,
@@ -264,10 +263,10 @@ async def update_resource(
     payload: ResourceUpdateRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    resource = await resources_collection.find_one({"_id": _oid(resource_id, "resource id")})
+    resource = await resources_collection.find_one(scoped(current_user, {"_id": _oid(resource_id, "resource id")}))
     if not resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
-    course = await _get_course_or_404(resource["course_id"])
+    course = await _get_course_or_404(resource["course_id"], current_user)
     await _assert_can_edit_course(course, current_user)
 
     update_fields = {k: v for k, v in payload.model_dump().items() if v is not None}
@@ -283,10 +282,10 @@ async def update_resource(
 
 @router.delete("/api/resources/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_resource(resource_id: str, current_user: dict = Depends(get_current_user)):
-    resource = await resources_collection.find_one({"_id": _oid(resource_id, "resource id")})
+    resource = await resources_collection.find_one(scoped(current_user, {"_id": _oid(resource_id, "resource id")}))
     if not resource:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
-    course = await _get_course_or_404(resource["course_id"])
+    course = await _get_course_or_404(resource["course_id"], current_user)
     await _assert_can_edit_course(course, current_user)
 
     await resources_collection.delete_one({"_id": resource["_id"]})

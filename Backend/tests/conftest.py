@@ -18,8 +18,15 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 from app.main import app
-from app.core.database import db, users_collection
+from app.core.database import db, users_collection, institutes_collection
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
+from app.services.institutes import new_institute_doc
+
+# Login / accept-invite are rate limited in production (brute-force
+# protection). The suite signs in far more often than any real user would,
+# so the limiter is switched off for tests.
+limiter.enabled = False
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -38,9 +45,19 @@ async def async_client():
 
 
 @pytest_asyncio.fixture
-async def auth_headers(async_client):
-    """A ready-to-use admin account + Authorization header."""
+async def institute():
+    """The institute that `auth_headers`' admin belongs to."""
+    doc = new_institute_doc("Test Institute", "test-institute")
+    result = await institutes_collection.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return doc
+
+
+@pytest_asyncio.fixture
+async def auth_headers(async_client, institute):
+    """A ready-to-use Institute Admin account + Authorization header."""
     await users_collection.insert_one({
+        "institute_id": str(institute["_id"]),
         "name": "Test Admin",
         "email": "admin@test.com",
         "password_hash": hash_password("TestAdmin123"),

@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from bson import ObjectId
 
-from app.core.security import decode_access_token
+from app.core.security import authenticate_token
 from app.core.database import classes_collection, enrollments_collection, users_collection
 
 router = APIRouter()
@@ -48,21 +48,24 @@ meeting_manager = MeetingRoomManager()
 @router.websocket("/ws/meeting/{meeting_id}")
 async def meeting_websocket(websocket: WebSocket, meeting_id: str, token: str = Query(...)):
     try:
-        payload = decode_access_token(token)
+        auth = await authenticate_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
 
-    user_id = payload.get("sub")
-    role = payload.get("role")
-    if not user_id:
-        await websocket.close(code=4401)
+    user_id = auth["user_id"]
+    role = auth["role"]
+    institute_id = auth["institute_id"]
+    if not institute_id:
+        await websocket.close(code=4403)
         return
 
     if not ObjectId.is_valid(meeting_id):
         await websocket.close(code=4400)
         return
-    cls = await classes_collection.find_one({"_id": ObjectId(meeting_id)})
+    # Scoped to the caller's institute: another tenant's class looks like
+    # a class that doesn't exist.
+    cls = await classes_collection.find_one({"_id": ObjectId(meeting_id), "institute_id": institute_id})
     if not cls:
         await websocket.close(code=4404)
         return
@@ -74,7 +77,7 @@ async def meeting_websocket(websocket: WebSocket, meeting_id: str, token: str = 
         allowed = True
     elif role == "student":
         enrollment = await enrollments_collection.find_one(
-            {"course_id": cls["course_id"], "student_id": user_id}
+            {"course_id": cls["course_id"], "student_id": user_id, "institute_id": institute_id}
         )
         allowed = enrollment is not None
 
@@ -82,8 +85,8 @@ async def meeting_websocket(websocket: WebSocket, meeting_id: str, token: str = 
         await websocket.close(code=4403)
         return
 
-    user = await users_collection.find_one({"_id": ObjectId(user_id)})
-    name = user["name"] if user else "Unknown"
+    account = await users_collection.find_one({"_id": ObjectId(user_id)})
+    name = account["name"] if account else "Unknown"
 
     # The new joiner learns who's already here, and will initiate an
     # offer to each of them (avoids both sides racing to offer at once).

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
-from app.core.security import decode_access_token
+from app.core.security import authenticate_token
 from app.websocket.manager import manager
 
 router = APIRouter()
@@ -9,25 +9,28 @@ router = APIRouter()
 @router.websocket("/ws/presence")
 async def presence_websocket(websocket: WebSocket, token: str = Query(...)):
     try:
-        payload = decode_access_token(token)
+        user = await authenticate_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
 
-    user_id = payload.get("sub")
-    if not user_id:
-        await websocket.close(code=4401)
+    user_id = user["user_id"]
+    institute_id = user["institute_id"]
+    if not institute_id:  # platform admins have no institute to be "present" in
+        await websocket.close(code=4403)
         return
 
-    await manager.connect(user_id, websocket)
+    await manager.connect(user_id, websocket, institute_id)
 
-    # Send the new connection a full snapshot of who's already online,
-    # since it only just started listening for presence deltas.
+    # Send the new connection a snapshot of who's already online IN ITS OWN
+    # INSTITUTE, since it only just started listening for presence deltas.
     await websocket.send_json({
         "type": "online_users",
-        "user_ids": list(manager.active_connections.keys()),
+        "user_ids": manager.online_user_ids(institute_id),
     })
-    await manager.broadcast({"type": "presence", "user_id": user_id, "online": True}, exclude_user_id=user_id)
+    await manager.broadcast_to_institute(
+        institute_id, {"type": "presence", "user_id": user_id, "online": True}, exclude_user_id=user_id,
+    )
 
     try:
         while True:
@@ -35,4 +38,6 @@ async def presence_websocket(websocket: WebSocket, token: str = Query(...)):
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
         if not manager.is_online(user_id):
-            await manager.broadcast({"type": "presence", "user_id": user_id, "online": False})
+            await manager.broadcast_to_institute(
+                institute_id, {"type": "presence", "user_id": user_id, "online": False},
+            )
