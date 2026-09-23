@@ -50,11 +50,16 @@ def invitation_status(invitation: dict) -> str:
     return stored
 
 
-async def issue_invitation(*, institute_id: str, name: str, email: str, role: str, invited_by: str) -> tuple[dict, str]:
+async def issue_invitation(
+    *, institute_id: str, name: str, email: str, role: str, invited_by: str, student_ids: list[str] | None = None,
+) -> tuple[dict, str]:
     """Creates an invitation and returns (document, raw_token).
 
     Any earlier still-pending invitation to the same email in the same
     institute is revoked, so only the newest link works.
+
+    `student_ids` is only meaningful for role="parent": the children the
+    parent will be linked to the moment they accept.
     """
     if await users_collection.find_one({"email": email}, {"_id": 1}):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An account with this email already exists")
@@ -71,6 +76,7 @@ async def issue_invitation(*, institute_id: str, name: str, email: str, role: st
         "name": name,
         "email": email,
         "role": role,
+        "student_ids": student_ids or [],
         "token_hash": hash_invite_token(token),
         "status": "pending",
         "invited_by": invited_by,

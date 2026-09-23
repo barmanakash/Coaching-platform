@@ -1,15 +1,10 @@
 import { useState } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { Box, TextField, Button, Typography, Alert, Link } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import { Box, TextField, Button, Typography, Alert } from '@mui/material';
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
+import { ROLE_HOME, apiErrorMessage } from '../../utils/roleHome';
 import AuthShell from './AuthShell';
-
-const ROLE_HOME = {
-  admin: '/admin',
-  teacher: '/teacher',
-  student: '/student',
-};
 
 export default function Login() {
   const { login } = useAuth();
@@ -39,7 +34,7 @@ export default function Login() {
       const user = await login(email, password);
       navigate(ROLE_HOME[user.role] || '/login');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed. Please try again.');
+      setError(apiErrorMessage(err, 'Login failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -106,10 +101,8 @@ export default function Login() {
           </Box>
 
           <Typography variant="body2" mt={3} textAlign="center" color="text.secondary">
-            New here?{' '}
-            <Link component={RouterLink} to="/signup" underline="hover" fontWeight={600}>
-              Create an account
-            </Link>
+            Accounts are created by invitation from your institute admin.
+            If you received an invite link, open it directly to set up your account.
           </Typography>
         </Box>
       </motion.div>

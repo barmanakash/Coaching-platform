@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
-import { login as loginApi, signup as signupApi } from '../services/api/authApi';
+import { login as loginApi } from '../services/api/authApi';
 
 const AuthContext = createContext(null);
 
@@ -9,12 +9,13 @@ export function AuthProvider({ children }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const login = useCallback(async (email, password) => {
-    const data = await loginApi(email, password);
+  const applySession = useCallback((data) => {
     const userInfo = {
       userId: data.user_id,
       name: data.name,
       role: data.role,
+      instituteId: data.institute_id || null,
+      instituteName: data.institute_name || null,
     };
     localStorage.setItem('access_token', data.access_token);
     localStorage.setItem('user', JSON.stringify(userInfo));
@@ -22,11 +23,14 @@ export function AuthProvider({ children }) {
     return userInfo;
   }, []);
 
-  const signup = useCallback(async ({ name, email, password, role, phone }) => {
-    // Accounts start "pending" and require admin approval, so signup does
-    // NOT log the user in — it just returns the confirmation message.
-    return signupApi({ name, email, password, role, phone });
-  }, []);
+  const login = useCallback(async (email, password) => {
+    const data = await loginApi(email, password);
+    return applySession(data);
+  }, [applySession]);
+
+  // Used by the accept-invite page: the backend returns the same token
+  // shape as /login, so a freshly-created account signs straight in.
+  const setSessionFromInvite = useCallback((data) => applySession(data), [applySession]);
 
   const logout = useCallback(() => {
     localStorage.removeItem('access_token');
@@ -34,12 +38,23 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const updateInstituteName = useCallback((name) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, instituteName: name };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   const value = {
     user,
     isAuthenticated: !!user,
+    isSuperAdmin: user?.role === 'super_admin',
     login,
-    signup,
+    setSessionFromInvite,
     logout,
+    updateInstituteName,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

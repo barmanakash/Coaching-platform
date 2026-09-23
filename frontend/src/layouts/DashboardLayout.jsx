@@ -51,7 +51,14 @@ export default function DashboardLayout({ title, navItems }) {
         }}
       >
         <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-          <Typography variant="h6" noWrap sx={{ color: '#FFFFFF' }}>{title}</Typography>
+          <Box>
+            <Typography variant="h6" noWrap sx={{ color: '#FFFFFF', lineHeight: 1.2 }}>{title}</Typography>
+            {user?.instituteName && (
+              <Typography variant="caption" noWrap sx={{ color: 'rgba(255,255,255,0.6)' }}>
+                {user.instituteName}
+              </Typography>
+            )}
+          </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <IconButton onClick={(e) => setBellAnchor(e.currentTarget)} sx={{ color: '#FFFFFF' }}>
               <Badge badgeContent={unreadCount} color="secondary">

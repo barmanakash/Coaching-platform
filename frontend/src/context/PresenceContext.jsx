@@ -19,13 +19,15 @@ const PresenceContext = createContext({
  *    reply, message, signup, approval, etc.) — no separate socket needed.
  */
 export function PresenceProvider({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isSuperAdmin } = useAuth();
   const [onlineUserIds, setOnlineUserIds] = useState(new Set());
   const [notifications, setNotifications] = useState([]);
   const socketRef = useRef(null);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    // The platform Super Admin belongs to no institute, so there is no
+    // presence room or notification inbox for them to connect to.
+    if (!isAuthenticated || isSuperAdmin) {
       setOnlineUserIds(new Set());
       setNotifications([]);
       return;
@@ -66,7 +68,7 @@ export function PresenceProvider({ children }) {
     return () => {
       socket.close();
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isSuperAdmin]);
 
   const markRead = useCallback(async (id) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));

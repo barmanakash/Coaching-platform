@@ -103,5 +103,5 @@ async def create_institute(payload: InstituteCreateRequest, current_user: dict =
 
     return InstituteCreatedOut(
         institute=await _summarize(doc),
-        admin_invitation=serialize_created(invitation, token),
+        admin_invitation=await serialize_created(invitation, token),
     )

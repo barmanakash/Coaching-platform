@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, status, Request
 from pydantic import BaseModel, EmailStr, Field
 from pymongo.errors import DuplicateKeyError
 
-from app.core.database import users_collection, institutes_collection, invitations_collection
+from app.core.database import users_collection, institutes_collection, invitations_collection, parent_links_collection
 from app.core.security import hash_password, verify_password, create_access_token, SUPER_ADMIN_ROLE
 from app.core.rate_limit import limiter
 from app.core.logging_config import logger
@@ -191,5 +191,17 @@ async def accept_invite(request: Request, payload: AcceptInviteRequest):
                 link="/admin/invitations",
                 institute_id=institute_id,
             )
+
+    if invitation["role"] == "parent" and invitation.get("student_ids"):
+        parent_id = str(result.inserted_id)
+        await parent_links_collection.insert_many([
+            {
+                "institute_id": institute_id,
+                "parent_id": parent_id,
+                "student_id": student_id,
+                "created_at": now,
+            }
+            for student_id in invitation["student_ids"]
+        ])
 
     return _token_response(new_user, await _institute_name(institute_id))

@@ -24,6 +24,7 @@ messages_collection = db["messages"]
 notifications_collection = db["notifications"]
 assignments_collection = db["assignments"]
 submissions_collection = db["submissions"]
+parent_links_collection = db["parent_links"]
 
 # Collections whose documents belong to exactly one institute. Used by the
 # migration script and by tests; add new tenant-scoped collections here.
@@ -40,6 +41,7 @@ TENANT_COLLECTIONS = {
     "notifications": notifications_collection,
     "assignments": assignments_collection,
     "submissions": submissions_collection,
+    "parent_links": parent_links_collection,
 }
 
 
@@ -120,3 +122,9 @@ async def ensure_indexes() -> None:
     # notifications: "my notifications" sorted newest-first, unread filter
     await notifications_collection.create_index([("user_id", 1), ("created_at", -1)])
     await notifications_collection.create_index([("user_id", 1), ("read", 1)])
+
+    # parent_links: a parent's list of children, and reverse lookup (which
+    # parents a student has) — each pair may exist only once.
+    await parent_links_collection.create_index([("parent_id", 1), ("student_id", 1)], unique=True)
+    await parent_links_collection.create_index("student_id")
+    await parent_links_collection.create_index("institute_id")
